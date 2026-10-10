@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import filecmp
 import fnmatch
+import glob
 import os
 import re
 from pathlib import Path
@@ -167,14 +168,46 @@ def is_multidisc(path_name: Path) -> bool:
     return any(pat.match(path_name.name) for pat in MULTIDISC_PATTERNS)
 
 
+def is_multidisc_sibling(path_name: Path) -> bool:
+    """Checks if a directory is part of a multi-disc sequence of sibling directories.
+
+    A name like `Album UDCD 2-591` matches the disc pattern on its own, so this also
+    requires at least one sibling directory with the same prefix followed by a disc
+    number (e.g., `CD1` alongside `CD2`), mirroring the beets importer's grouping.
+    """
+    prefixes: list[str] = [
+        match[1] for pat in MULTIDISC_PATTERNS if (match := pat.match(path_name.name))
+    ]
+
+    if not prefixes:
+        return False
+
+    sibling_patterns: list[re.Pattern[str]] = [
+        re.compile(rf"^{re.escape(prefix)}\d", re.IGNORECASE) for prefix in prefixes
+    ]
+
+    try:
+        siblings = list(path_name.parent.iterdir())
+    except OSError:
+        return False
+
+    return any(
+        sibling.name != path_name.name
+        and sibling.is_dir()
+        and any(pat.match(sibling.name) for pat in sibling_patterns)
+        for sibling in siblings
+    )
+
+
 def get_multidisc_ignore_paths(parent_path: Path) -> list[str]:
     """Returns a list of patterns to ignore standard disc directories.
 
     This function scans that directory and returns the specific directory names that
-    match multi-disc criteria.
+    match multi-disc criteria. Names are escaped since the ignore list is matched
+    with `fnmatch`, where characters such as `[` and `]` are special.
     """
     return [
-        item.name
+        glob.escape(item.name)
         for item in parent_path.iterdir()
         if item.is_dir() and is_multidisc(item)
     ]

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Album folders whose names merely resemble a disc folder (e.g. `... UDCD 2-591`)
+  are no longer treated as multi-disc, which caused their extras to be copied a
+  second time into a nested album folder. Disc folder names containing glob
+  characters (`[`, `]`, `*`, `?`) are now correctly skipped when scanning the
+  multi-disc parent.
+
 ## [1.3.7] - 2026-08-04
 
 ### Changed

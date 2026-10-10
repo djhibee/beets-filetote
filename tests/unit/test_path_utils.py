@@ -1,5 +1,6 @@
 """Tests for the filesystem utility functions in `path_utils`."""
 
+import fnmatch
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -267,3 +268,48 @@ class TestPathUtils:
         assert "CD2" in ignore_paths
         assert "Bonus" not in ignore_paths
         assert "CD3.txt" not in ignore_paths
+
+    def test_get_multidisc_ignore_paths_escapes_glob_characters(
+        self, tmp_path: Path
+    ) -> None:
+        """Disc folder names with glob metacharacters must still ignore themselves."""
+        for name in ("Album [FLAC] CD1", "Album [FLAC] CD2", "Bonus"):
+            (tmp_path / name).mkdir()
+
+        ignore_paths = path_utils.get_multidisc_ignore_paths(tmp_path)
+
+        assert sorted(ignore_paths) == ["Album [[]FLAC] CD1", "Album [[]FLAC] CD2"]
+        for name in ("Album [FLAC] CD1", "Album [FLAC] CD2"):
+            assert any(fnmatch.fnmatch(name, pattern) for pattern in ignore_paths)
+        assert not any(fnmatch.fnmatch("Bonus", pattern) for pattern in ignore_paths)
+
+    @pytest.mark.parametrize(
+        ("dirs", "target", "expected"),
+        [
+            # Genuine disc sequences
+            (["CD1", "CD2"], "CD1", True),
+            (["Disc 1", "Disc 2", "Artwork"], "Disc 2", True),
+            (["Album [FLAC] CD1", "Album [FLAC] CD2"], "Album [FLAC] CD1", True),
+            # A lone album folder whose name merely looks like a disc folder
+            (
+                ["[1972] Album {1994,US,MFSL,UDCD 2-591[FLAC 16-44]"],
+                "[1972] Album {1994,US,MFSL,UDCD 2-591[FLAC 16-44]",
+                False,
+            ),
+            (["CD1"], "CD1", False),
+            # Siblings must share the same prefix as the target
+            (["CD1", "Disc 2"], "CD1", False),
+            (["Other UDCD 1", "Album UDCD 2"], "Album UDCD 2", False),
+            # Not a disc name at all
+            (["Bonus", "CD1"], "Bonus", False),
+        ],
+    )
+    def test_is_multidisc_sibling(
+        self, tmp_path: Path, dirs: list[str], target: str, expected: bool
+    ) -> None:
+        """Only directories with a matching disc-numbered sibling count as discs."""
+        for name in dirs:
+            (tmp_path / name).mkdir()
+        (tmp_path / "CD2.txt").touch()
+
+        assert path_utils.is_multidisc_sibling(tmp_path / target) is expected

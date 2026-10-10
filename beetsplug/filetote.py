@@ -736,7 +736,7 @@ class FiletotePlugin(BeetsPlugin):
 
         parent_artifacts: list[Path] = []
 
-        if beets_item.disctotal > 1 and path_utils.is_multidisc(source_path):
+        if beets_item.disctotal > 1 and path_utils.is_multidisc_sibling(source_path):
             multidisc_parent_path: Path = source_path.parent
 
             if multidisc_parent_path not in self._run_state.dirs_seen:
