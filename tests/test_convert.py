@@ -102,6 +102,32 @@ def test_convert_exports_artifacts(
         ).stat().st_ino
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("keep_new", [False, True])
+def test_convert_export_setting(
+    beets_flat_env: BeetsEnvFactory, enabled: bool, keep_new: bool
+) -> None:
+    """The export setting controls extras without affecting imports or audio."""
+    env = beets_flat_env()
+    env.config["filetote"]["convert"] = enabled
+    env.config["filetote"]["extensions"] = ".*"
+    env.config["filetote"]["pairing"]["enabled"] = True
+    env.run_cli_command("import")
+    source = env.lib_dir / "Tag Artist" / "Tag Album"
+    assert (source / "artifact.file").is_file()
+    assert list(source.glob("*.lrc"))
+    destination = env.temp_dir / "converted"
+    env.config["convert"]["dest"] = str(destination)
+
+    _convert(env, keep_new=keep_new)
+
+    assert list(destination.rglob("*.mp3"))
+    assert bool(list(destination.rglob("*.file"))) is enabled
+    assert bool(list(destination.rglob("*.lrc"))) is enabled
+    assert (source / "artifact.file").is_file()
+    assert list(source.glob("*.lrc"))
+
+
 def test_convert_pretend_does_not_export_extras(
     beets_flat_env: BeetsEnvFactory,
 ) -> None:
@@ -202,11 +228,13 @@ def test_convert_cli_link_with_hardlink_config(
     ).is_symlink()
 
 
+@pytest.mark.parametrize("enabled", [False, True])
 def test_import_conversion_events_use_normal_import_handling(
-    beets_nested_env: BeetsEnvFactory,
+    beets_nested_env: BeetsEnvFactory, enabled: bool
 ) -> None:
     """Import-time auto_keep events must not rediscover pruned source folders."""
     env = beets_nested_env(move=True, copy=False)
+    env.config["filetote"]["convert"] = enabled
     env.config["filetote"]["extensions"] = ".*"
     destination = env.temp_dir / "converted" / "track.mp3"
     destination.parent.mkdir()

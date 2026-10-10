@@ -117,8 +117,16 @@ filetote:
 ### Conversion exports
 
 Enable both `filetote` and `convert`, and configure the usual Filetote inclusion
-rules (`extensions`, `filenames`, `patterns`, or `pairing`). No separate conversion
-setting is required. Conversion exports use the same exclusion, renaming,
+rules (`extensions`, `filenames`, `patterns`, or `pairing`). Conversion exports are
+enabled by default. To disable extra-file exports without affecting normal imports
+or the beets `convert` plugin's audio conversion, set:
+
+```yaml
+filetote:
+  convert: false
+```
+
+Conversion exports use the same exclusion, renaming,
 subdirectory, multi-disc, and duplicate handling rules as imports; `$albumpath`
 refers to the exported track's directory and paired extras follow its output name.
 

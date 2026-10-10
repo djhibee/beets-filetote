@@ -137,6 +137,7 @@ class FiletotePlugin(BeetsPlugin):
             patterns=self.config["patterns"].get(dict),
             paths=self.config["paths"].get(dict),
             print_ignored=self.config["print_ignored"].get(bool),
+            convert=self.config["convert"].get(bool),
             duplicate_action=cast(
                 DuplicateAction,
                 self.config["duplicate_action"].as_str(),
@@ -253,6 +254,8 @@ class FiletotePlugin(BeetsPlugin):
 
     def _after_convert(self, item: Item, dest: PathBytes) -> None:
         """Queue extras alongside a successfully exported convert output."""
+        if not self.filetote_config.convert:
+            return
         # auto_keep can emit after_convert during an import. Normal import file
         # events own those extras, and may move/prune their source before cli_exit.
         if item.id in self._run_state.imported_items_paths:

@@ -196,6 +196,7 @@ class FiletoteConfig:
             console as imports finish.
         duplicate_action: How to handle artifacts when there is a conflict in the
             destination. Options are `merge` (default), `skip`, `keep`, and `remove`.
+        convert: Whether to export artifacts alongside converted tracks.
     """
 
     session: FiletoteSessionData = field(default_factory=FiletoteSessionData)
@@ -207,6 +208,7 @@ class FiletoteConfig:
     paths: dict[str, str] = field(default_factory=dict)
     print_ignored: bool = False
     duplicate_action: DuplicateAction = "merge"
+    convert: bool = True
 
     def __post_init__(self) -> None:
         """Validates types upon initialization."""
@@ -258,7 +260,7 @@ class FiletoteConfig:
                     )
                 case "paths":
                     _validate_types_dict([field_.name], field_value, field_type=str)
-                case "print_ignored":
+                case "print_ignored" | "convert":
                     _validate_types_instance([field_.name], field_value, field_type)
                 case "duplicate_action":
                     _validate_types_literal_str(
