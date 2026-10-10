@@ -253,9 +253,12 @@ class FiletotePlugin(BeetsPlugin):
 
     def _after_convert(self, item: Item, dest: PathBytes) -> None:
         """Queue extras alongside a successfully exported convert output."""
+        # auto_keep can emit after_convert during an import. Normal import file
+        # events own those extras, and may move/prune their source before cli_exit.
+        if item.id in self._run_state.imported_items_paths:
+            return
         # `dest` is the exported file, including when --keep-new exports the
-        # original and leaves the converted file in the library. Import-time
-        # conversion does not emit this event; its normal file events still apply.
+        # original and leaves the converted file in the library.
         destination = path_utils.to_path(dest)
         if not destination.is_file():
             return

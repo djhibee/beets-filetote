@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from beets import plugins, util
+from beets.plugins import BeetsPlugin
 
 from tests.pytest_beets_plugin.plugin_lifecycle import (
     _activate_plugins,
@@ -15,6 +16,8 @@ from tests.pytest_beets_plugin.plugin_lifecycle import (
 )
 
 if TYPE_CHECKING:
+    from beets.importer import ImportSession, ImportTask
+
     from tests.pytest_beets_plugin import BeetsEnvFactory, BeetsPluginFixture
 
 
@@ -197,3 +200,39 @@ def test_convert_cli_link_with_hardlink_config(
     assert (target / "artifact.file").is_symlink() == (
         target / "Tag Title 1.mp3"
     ).is_symlink()
+
+
+def test_import_conversion_events_use_normal_import_handling(
+    beets_nested_env: BeetsEnvFactory,
+) -> None:
+    """Import-time auto_keep events must not rediscover pruned source folders."""
+    env = beets_nested_env(move=True, copy=False)
+    env.config["filetote"]["extensions"] = ".*"
+    destination = env.temp_dir / "converted" / "track.mp3"
+    destination.parent.mkdir()
+    destination.touch()
+
+    _activate_plugins()
+    try:
+        simulated_convert = BeetsPlugin("simulated_convert")
+
+        def emit_conversion(_session: ImportSession, task: ImportTask) -> None:
+            """Simulate auto_keep's event after Filetote captures import paths."""
+            for item in task.imported_items():
+                plugins.send(
+                    "after_convert",
+                    item=item,
+                    dest=util.bytestring_path(destination),
+                    keepnew=False,
+                )
+
+        simulated_convert.early_import_stages = [emit_conversion]
+        plugins._instances.append(simulated_convert)  # ruff: ignore[private-member-access]
+        assert env.importer is not None
+        env.importer.run()
+        plugins.send("cli_exit", lib=env.lib)
+    finally:
+        _deactivate_plugins()
+
+    assert list(env.lib_dir.rglob("artifact.file"))
+    assert not (destination.parent / "artifact.file").exists()
