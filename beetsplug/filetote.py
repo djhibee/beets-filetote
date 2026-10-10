@@ -104,6 +104,7 @@ class FiletotePlugin(BeetsPlugin):
         self._run_state: FiletoteRun = FiletoteRun()
         self._convert_events: list[tuple[Item, Path, Path, MoveOperation]] = []
         self._convert_lock = Lock()
+        self._legacy_convert_operation: MoveOperation | None = None
 
         # Register listeners for beets events.
         self.early_import_stages = [self._get_imported_items_paths]
@@ -266,6 +267,7 @@ class FiletotePlugin(BeetsPlugin):
             operation = MoveOperation.HARDLINK
         elif config["convert"]["link"].get(bool):
             operation = MoveOperation.LINK
+        operation = self._legacy_convert_operation or operation
 
         # Conversion workers run in parallel. Only record events here; discovery
         # and duplicate handling run serially at cli_exit to avoid races.
@@ -340,6 +342,14 @@ class FiletotePlugin(BeetsPlugin):
 
         for plugin in find_plugins():
             if plugin.name == "convert":
+                # Before beets 2.12, CLI overrides only reach convert's option
+                # resolver, not its config. Observe the resolved link flags so
+                # extras use the same operation without changing user settings.
+                resolver = getattr(plugin, "_get_opts_and_config", None)
+                if resolver is not None:
+                    plugin._get_opts_and_config = (  # type: ignore[attr-defined]  # ruff: ignore[private-member-access]
+                        self._convert_option_resolver(resolver)
+                    )
                 convert_early_import_stages = plugin.early_import_stages
                 if convert_early_import_stages:
                     plugin.early_import_stages = []
@@ -349,6 +359,25 @@ class FiletotePlugin(BeetsPlugin):
 
             if plugin.name == "audible":
                 self._beets_file_types.update({"m4b": "M4B"})
+
+    def _convert_option_resolver(
+        self, resolver: Callable[..., Any]
+    ) -> Callable[..., Any]:
+        """Observe effective legacy convert options while preserving its result."""
+
+        def resolve(*args: Any, **kwargs: Any) -> Any:
+            options = resolver(*args, **kwargs)
+            hardlink, link = options[5:7]
+            self._legacy_convert_operation = (
+                MoveOperation.HARDLINK
+                if hardlink
+                else MoveOperation.LINK
+                if link
+                else MoveOperation.COPY
+            )
+            return options
+
+        return resolve
 
     def _register_session_settings(self, session: ImportSession) -> None:
         """Certain settings are only available and/or finalized once the

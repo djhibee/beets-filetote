@@ -19,20 +19,30 @@ if TYPE_CHECKING:
 
 
 def _convert(
-    env: BeetsPluginFixture, *, pretend: bool = False, keep_new: bool = False
+    env: BeetsPluginFixture,
+    *,
+    pretend: bool = False,
+    keep_new: bool = False,
+    cli_options: list[str] | None = None,
 ) -> None:
-    """Export using convert's real worker without requiring a transcoder."""
+    """Export using convert's real CLI without requiring a transcoder."""
     _activate_plugins()
     try:
-        plugins.send("pluginload")
         convert = importlib.import_module("beetsplug.convert").ConvertPlugin()
+        plugins._instances.append(convert)  # ruff: ignore[private-member-access]
+        plugins.send("pluginload")
         convert.config["format"] = "mp3"
         convert.config["pretend"] = pretend
         convert.config["write_metadata"] = False
         convert.config["threads"] = 2
+        convert.config["paths"] = {"default": "$artist/$album/$title"}
         convert.config["keep_new"] = keep_new
-        items = list(env.lib.items())
-        convert._parallel_convert(items, keep_new=keep_new)  # ruff: ignore[private-member-access]
+        command = convert.commands()[0]
+        arguments = ["--yes", *(cli_options or [])]
+        if keep_new:
+            arguments.append("--keep-new")
+        opts, args = command.parser.parse_args(arguments)
+        command.func(env.lib, opts, args)
         plugins.send("cli_exit", lib=env.lib)
     finally:
         _deactivate_plugins()
@@ -169,3 +179,21 @@ def test_convert_multidisc_extras(beets_nested_env: BeetsEnvFactory) -> None:
     assert list(destination.rglob("summary.txt"))
     assert list(destination.rglob("artifact.file"))
     assert list(env.lib_dir.rglob("summary.txt"))
+
+
+@pytest.mark.needs_symlink
+def test_convert_cli_link_with_hardlink_config(
+    beets_flat_env: BeetsEnvFactory,
+) -> None:
+    """Extras follow the effective CLI operation on each supported beets version."""
+    env = beets_flat_env()
+    env.config["filetote"]["extensions"] = ".*"
+    env.run_cli_command("import")
+    destination = env.temp_dir / "converted"
+    env.config["convert"]["dest"] = str(destination)
+    env.config["convert"]["hardlink"] = True
+    _convert(env, cli_options=["--link"])
+    target = destination / "Tag Artist/Tag Album"
+    assert (target / "artifact.file").is_symlink() == (
+        target / "Tag Title 1.mp3"
+    ).is_symlink()
