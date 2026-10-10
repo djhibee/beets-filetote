@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Avoid duplicate extras during conversion when album names contain embedded CD
+  markers, and treat detected disc directory names literally in parent-scan ignores.
+
 ## [1.3.7] - 2026-08-04
 
 ### Changed

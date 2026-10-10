@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import filecmp
 import fnmatch
+import glob
 import os
 import re
 from pathlib import Path
@@ -32,6 +33,11 @@ except ImportError:
         )
         for marker in MULTIDISC_MARKERS
     ]
+
+MULTIDISC_PATTERNS = [
+    re.compile(pat.pattern.replace("cd", r"(?:\b|[-_]+)cd"), pat.flags)
+    for pat in MULTIDISC_PATTERNS
+]
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -162,7 +168,8 @@ def is_path_within_ancestry(child_path: Path | None, parent_path: Path) -> bool:
 
 def is_multidisc(path_name: Path) -> bool:
     """Checks if a directory name matches the multi-disc pattern by replicating the
-    beets importer's pattern matching for disc folders.
+    beets importer's pattern matching for disc folders, except that CD must start
+    a word or follow a hyphen/underscore separator.
     """
     return any(pat.match(path_name.name) for pat in MULTIDISC_PATTERNS)
 
@@ -174,7 +181,7 @@ def get_multidisc_ignore_paths(parent_path: Path) -> list[str]:
     match multi-disc criteria.
     """
     return [
-        item.name
+        glob.escape(item.name)
         for item in parent_path.iterdir()
         if item.is_dir() and is_multidisc(item)
     ]

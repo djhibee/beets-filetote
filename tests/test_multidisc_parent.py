@@ -81,6 +81,31 @@ class TestMultidiscParent:
         env.assert_in_lib_dir("Tag Artist/Tag Album/02/artifact3.file")
         env.assert_not_in_lib_dir("Tag Artist/Tag Album/01/artifact3.file")
 
+    def test_disc_names_with_brackets_preserve_subpaths(self) -> None:
+        """Parent scans must not rediscover extras inside literal disc names."""
+        env = self.env
+        album = env.import_dir / "the_album"
+        for disc in (1, 2):
+            (album / f"disc{disc}").rename(album / f"CD{disc} [Live]")
+        env.config["filetote"]["extensions"] = [".file", ".txt"]
+        env.config["filetote"]["paths"]["filetote:default"] = (
+            "$albumpath/$subpath/$old_filename"
+        )
+        env.lib.path_formats = [
+            ("default", "$artist/$album/CD$disc [Live]/$title"),
+        ]
+
+        env.run_cli_command("import")
+
+        target = env.lib_dir / "Tag Artist" / "Tag Album"
+        assert list(target.rglob("artifact.file")) == [
+            target / "CD01 [Live]" / "artifact.file"
+        ]
+        assert list(target.rglob("artifact3.file")) == [
+            target / "CD02 [Live]" / "artifact3.file"
+        ]
+        assert len(list(target.rglob("summary.txt"))) == 1
+
     def test_preserves_parent_structure_with_pattern(self) -> None:
         """Verify that original structure for Parent artifacts can be recreated."""
         env = self.env

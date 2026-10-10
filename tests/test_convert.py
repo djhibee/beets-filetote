@@ -27,6 +27,7 @@ def _convert(
     pretend: bool = False,
     keep_new: bool = False,
     cli_options: list[str] | None = None,
+    path_format: str = "$artist/$album/$title",
 ) -> None:
     """Export using convert's real CLI without requiring a transcoder."""
     _activate_plugins()
@@ -38,7 +39,7 @@ def _convert(
         convert.config["pretend"] = pretend
         convert.config["write_metadata"] = False
         convert.config["threads"] = 2
-        convert.config["paths"] = {"default": "$artist/$album/$title"}
+        convert.config["paths"] = {"default": path_format}
         convert.config["keep_new"] = keep_new
         command = convert.commands()[0]
         arguments = ["--yes", *(cli_options or [])]
@@ -193,21 +194,79 @@ def test_convert_without_inclusion_rules(beets_flat_env: BeetsEnvFactory) -> Non
     assert not list(destination.rglob("*.lrc"))
 
 
-def test_convert_multidisc_extras(beets_nested_env: BeetsEnvFactory) -> None:
+@pytest.mark.parametrize("disc_folder", ["CD$disc", "CD$disc [Live]"])
+def test_convert_multidisc_extras(
+    beets_nested_env: BeetsEnvFactory, disc_folder: str
+) -> None:
     """Multi-disc exports include parent and disc extras without moving sources."""
     env = beets_nested_env(parent_artifacts=["summary.txt"])
     env.config["filetote"]["extensions"] = ".*"
-    env.config["paths"]["default"] = "$artist/$album/CD$disc/$title"
+    path_format = f"$artist/$album/{disc_folder}/$title"
+    env.config["paths"]["default"] = path_format
     env.lib.path_formats = [
-        ("default", "$artist/$album/CD$disc/$title"),
+        ("default", path_format),
     ]
     env.run_cli_command("import")
     destination = env.temp_dir / "converted"
     env.config["convert"]["dest"] = str(destination)
-    _convert(env)
-    assert list(destination.rglob("summary.txt"))
-    assert list(destination.rglob("artifact.file"))
+    _convert(env, path_format=path_format)
+    target = destination / "Tag Artist" / "Tag Album"
+    first_disc = disc_folder.replace("$disc", "01")
+    assert list(destination.rglob("summary.txt")) == [
+        target / first_disc / "summary.txt"
+    ]
+    assert list(destination.rglob("artifact.file")) == [
+        target / first_disc / "artifact.file"
+    ]
     assert list(env.lib_dir.rglob("summary.txt"))
+
+
+def test_convert_album_name_containing_udcd(
+    beets_flat_env: BeetsEnvFactory,
+) -> None:
+    """Root extras are copied once without scanning the artist directory."""
+    env = beets_flat_env()
+    env.run_cli_command("import")
+    artist = "Todd Rundgren ($artist_country)"
+    album = "[1972] Something_Anything_ {1994,US,Mobile Fidelity,UDCD 2-591[FLAC 16-44]"
+    source = env.lib_dir / artist / album
+    source.parent.mkdir()
+    old_source = env.lib_dir / "Tag Artist" / "Tag Album"
+    old_source.rename(source)
+    for item in env.lib.items():
+        item.path = util.bytestring_path(source / item.filepath.name)
+        item.artist = artist
+        item.album = album
+        item.disctotal = 2
+        item.store()
+    library_album = next(iter(env.lib.albums()))
+    library_album.album = album
+    library_album.albumartist = artist
+    library_album.store()
+    extras = [
+        "Something-Anything- [MFSL UDCD 2-591].1.cue",
+        "Something-Anything- [MFSL UDCD 2-591].1.log",
+        "Something-Anything- [MFSL UDCD 2-591].cue",
+        "Something-Anything- [MFSL UDCD 2-591].log",
+    ]
+    for name in extras:
+        env.create_file(source / name)
+    env.create_file(source.parent / "artist.log")
+    env.config["filetote"]["extensions"] = [".cue", ".log"]
+    env.config["filetote"]["paths"]["filetote:default"] = (
+        "$albumpath/$subpath/$old_filename"
+    )
+    destination = env.temp_dir / "converted"
+    env.config["convert"]["dest"] = str(destination)
+
+    _convert(env)
+
+    target = destination / artist / album
+    for name in extras:
+        assert [p for p in destination.rglob("*") if p.name == name] == [target / name]
+        assert (source / name).is_file()
+    assert not (target / album).exists()
+    assert not list(destination.rglob("artist.log"))
 
 
 @pytest.mark.needs_symlink
