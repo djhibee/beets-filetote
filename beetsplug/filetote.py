@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast
 
 from beets import config, logging, util
@@ -101,6 +102,8 @@ class FiletotePlugin(BeetsPlugin):
         }
 
         self._run_state: FiletoteRun = FiletoteRun()
+        self._convert_events: list[tuple[Item, Path, Path, MoveOperation]] = []
+        self._convert_lock = Lock()
 
         # Register listeners for beets events.
         self.early_import_stages = [self._get_imported_items_paths]
@@ -245,6 +248,29 @@ class FiletotePlugin(BeetsPlugin):
         self.register_listener("import_begin", self._register_session_settings)
 
         self.register_listener("cli_exit", self.process_events)
+        self.register_listener("after_convert", self._after_convert)
+
+    def _after_convert(self, item: Item, dest: PathBytes) -> None:
+        """Queue extras alongside a successfully exported convert output."""
+        # `dest` is the exported file, including when --keep-new exports the
+        # original and leaves the converted file in the library. Import-time
+        # conversion does not emit this event; its normal file events still apply.
+        destination = path_utils.to_path(dest)
+        if not destination.is_file():
+            return
+
+        # Convert applies CLI overrides to its config before emitting this event.
+        # Match its link precedence, but never move extras out of the library.
+        operation = MoveOperation.COPY
+        if config["convert"]["hardlink"].get(bool):
+            operation = MoveOperation.HARDLINK
+        elif config["convert"]["link"].get(bool):
+            operation = MoveOperation.LINK
+
+        # Conversion workers run in parallel. Only record events here; discovery
+        # and duplicate handling run serially at cli_exit to avoid races.
+        with self._convert_lock:
+            self._convert_events.append((item, item.filepath, destination, operation))
 
     def _build_file_event_function(
         self, event: FileOperationEvent
@@ -826,6 +852,29 @@ class FiletotePlugin(BeetsPlugin):
         """Triggered by the CLI exit event, which itself triggers the processing and
         manipulation of the extra files and artifacts.
         """
+        self._process_events(lib)
+
+        # Keep exports separate from import/move discovery and deduplication.
+        # In particular, a conversion must not inherit a reimport's move policy.
+        with self._convert_lock:
+            convert_events = self._convert_events
+            self._convert_events = []
+
+        previous_run = self._run_state
+        try:
+            for operation in dict.fromkeys(event[3] for event in convert_events):
+                self._run_state = FiletoteRun()
+                for item, source, destination, event_operation in convert_events:
+                    if event_operation == operation:
+                        self.collect_artifacts(item, source, destination)
+                self._process_events(lib, operation=operation)
+        finally:
+            self._run_state = previous_run
+
+    def _process_events(
+        self, lib: Library, operation: MoveOperation | None = None
+    ) -> None:
+        """Process a run, optionally overriding the operation for convert exports."""
         # Ensure destination library settings are accessible
         self.filetote_config.session.adjust("_beets_lib", lib)
         # Make the library path easier to access
@@ -867,6 +916,7 @@ class FiletotePlugin(BeetsPlugin):
                     source_artifacts=artifact_collection.artifacts,
                     mapping=artifact_collection.mapping,
                     beets_item=artifact_collection.beets_item,
+                    operation=operation,
                 )
 
         # Handle all shared artifacts for each source directory
@@ -895,6 +945,7 @@ class FiletotePlugin(BeetsPlugin):
                     source_artifacts=artifacts_to_process,
                     mapping=album_level_mapping,
                     beets_item=album_level_item,
+                    operation=operation,
                 )
 
     def _should_process_artifact(
@@ -962,6 +1013,7 @@ class FiletotePlugin(BeetsPlugin):
         source_artifacts: list[FiletoteArtifact],
         mapping: FiletoteMappingModel,
         beets_item: Item | None = None,
+        operation: MoveOperation | None = None,
     ) -> None:
         """Processes and prepares extra files and artifacts for subsequent
         manipulation.
@@ -1051,15 +1103,15 @@ class FiletotePlugin(BeetsPlugin):
 
             # In copy and link modes, treat reimports specially: move in-library
             # files. (Out-of-library files are copied/moved as usual).
-            is_reimport: bool = path_utils.is_reimport(
+            is_reimport: bool = operation is None and path_utils.is_reimport(
                 self.filetote_config.session.library_path,
                 self.filetote_config.session.import_path,
             )
 
-            operation: MoveOperation | None = self.filetote_config.session.operation
+            artifact_operation = operation or self.filetote_config.session.operation
 
             self.manipulate_artifact(
-                operation,
+                artifact_operation,
                 util.bytestring_path(artifact_source),
                 artifact_dest_unique,
                 is_reimport,
@@ -1068,7 +1120,7 @@ class FiletotePlugin(BeetsPlugin):
 
             artifact_parent: Path = artifact_source.parent
 
-            if operation == MoveOperation.MOVE or is_reimport:
+            if artifact_operation == MoveOperation.MOVE or is_reimport:
                 # Prune vacated directory. Depending on the type of operation,
                 # this might be a specific import path, the base library, etc.
                 root_path: Path | None = path_utils.get_prune_root_path(

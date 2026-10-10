@@ -10,6 +10,11 @@ A plugin that moves non-music extra files, attachments, and artifacts during imp
 CLI file manipulation actions (`move`, `modify`, reimport, etc.) for [beets], a music
 library manager (and much more!).
 
+With the beets `convert` plugin enabled, Filetote also exports matching extra files
+alongside successfully converted or copied tracks under `convert.dest` (or the
+destination supplied to `beet convert -d`). This makes the extras available when
+importing the exported music.
+
 This plugin runs on Python 3.10+ in beets `v2.4+` (tested through `v2.13`). Older
 versions of the plugin have additional compatibility back to `v1.6`.
 
@@ -108,6 +113,24 @@ filetote:
 ```
 
 [glob pattern]: https://docs.python.org/3/library/glob.html#module-glob
+
+### Conversion exports
+
+Enable both `filetote` and `convert`, and configure the usual Filetote inclusion
+rules (`extensions`, `filenames`, `patterns`, or `pairing`). No separate conversion
+setting is required. Conversion exports use the same exclusion, renaming,
+subdirectory, multi-disc, and duplicate handling rules as imports; `$albumpath`
+refers to the exported track's directory and paired extras follow its output name.
+
+Extras are copied by default. `convert.link` / `beet convert --link` symlinks them,
+and `convert.hardlink` / `beet convert --hardlink` hardlinks them (taking precedence
+over symlinks). Source extras are never moved or pruned, even with import move
+settings enabled. With `--keep-new`, extras accompany the original tracks exported
+to the destination while converted tracks remain in the library.
+
+Extras are processed when the command finishes. Pretend runs, failed conversions,
+and tracks skipped because the destination already exists do not export extras.
+Automatic conversion during import continues to use the normal import behavior.
 
 ### File Handling & Renaming
 
