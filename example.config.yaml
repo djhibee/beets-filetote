@@ -8,6 +8,7 @@ library: /beets/library.db
 directory: /beets/library
 
 filetote:
+    convert: true
     extensions: .*
     filename:
         - "folder.jpg"
