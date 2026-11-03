@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from pathlib import Path
 from re import Pattern
 
@@ -28,3 +29,6 @@ class Item(LibModel):
     disctotal: int
 
     def __init__(self) -> None: ...
+
+class Album(LibModel):
+    def items(self) -> Iterable[Item]: ...

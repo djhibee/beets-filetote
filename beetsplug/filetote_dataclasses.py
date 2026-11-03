@@ -170,6 +170,7 @@ class FiletoteRun:
     imported_items_paths: dict[int, Path] = field(default_factory=dict)
     process_queue: list[FiletoteArtifactCollection] = field(default_factory=list)
     shared_artifacts: dict[Path, FiletoteShared] = field(default_factory=dict)
+    pairing_candidates: dict[Path, list[Path]] = field(default_factory=dict)
     dirs_seen: list[Path] = field(default_factory=list)
     convert_early_import_stages: list[Callable[..., None]] = field(default_factory=list)
 
@@ -197,6 +198,7 @@ class FiletoteConfig:
         duplicate_action: How to handle artifacts when there is a conflict in the
             destination. Options are `merge` (default), `skip`, `keep`, and `remove`.
         convert: Whether to export artifacts alongside converted tracks.
+        process_on_import: Whether to process artifacts at album/item completion.
     """
 
     session: FiletoteSessionData = field(default_factory=FiletoteSessionData)
@@ -209,6 +211,7 @@ class FiletoteConfig:
     print_ignored: bool = False
     duplicate_action: DuplicateAction = "merge"
     convert: bool = True
+    process_on_import: bool = False
 
     def __post_init__(self) -> None:
         """Validates types upon initialization."""
@@ -260,7 +263,7 @@ class FiletoteConfig:
                     )
                 case "paths":
                     _validate_types_dict([field_.name], field_value, field_type=str)
-                case "print_ignored" | "convert":
+                case "print_ignored" | "convert" | "process_on_import":
                     _validate_types_instance([field_.name], field_value, field_type)
                 case "duplicate_action":
                     _validate_types_literal_str(

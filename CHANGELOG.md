@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add opt-in `filetote.process_on_import` to process extras at `album_imported`
+  and `item_imported`, before downstream import hooks, instead of waiting for exit.
+
 ### Fixed
 
 - Avoid duplicate extras during conversion when album names contain embedded CD

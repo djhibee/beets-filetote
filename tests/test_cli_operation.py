@@ -104,11 +104,13 @@ class TestCLIOperation:
 
         env.assert_in_lib_dir("Tag Artist/Tag Album/artifact.file")
 
-    def test_move_on_move_command(self) -> None:
+    @pytest.mark.parametrize("process_on_import", [False, True])
+    def test_move_on_move_command(self, process_on_import: bool) -> None:
         """Check that plugin detects the correct operation for the `move` (or `mv`)
         command, which is `MOVE` by default.
         """
         env = self.env
+        env.config["filetote"]["process_on_import"] = process_on_import
 
         env.create_flat_import_dir()
         env.setup_import_session(move=True, autotag=False)
@@ -129,12 +131,14 @@ class TestCLIOperation:
 
         env.assert_in_lib_dir("Tag Artist/Tag Album/artifact.file")
 
-    def test_copy_on_move_command_copy(self) -> None:
+    @pytest.mark.parametrize("process_on_import", [False, True])
+    def test_copy_on_move_command_copy(self, process_on_import: bool) -> None:
         """Check that plugin detects the correct operation for the `move` (or `mv`)
         command when `copy` is set. The files should be present in both the original
         and new Library locations.
         """
         env = self.env
+        env.config["filetote"]["process_on_import"] = process_on_import
 
         env.create_flat_import_dir()
         env.setup_import_session(move=True, autotag=False)
