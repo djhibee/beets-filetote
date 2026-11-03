@@ -140,6 +140,35 @@ Extras are processed when the command finishes. Pretend runs, failed conversions
 and tracks skipped because the destination already exists do not export extras.
 Automatic conversion during import continues to use the normal import behavior.
 
+### Import processing timing
+
+By default, Filetote collects extras during file operations and copies or moves
+them at `cli_exit`. To process extras as each album or individual track finishes
+importing instead, enable:
+
+```yaml
+plugins: filetote hook
+
+filetote:
+  process_on_import: true
+```
+
+This processes the completed album's extras at `album_imported`, or a singleton's
+extras at `item_imported`. Put `filetote` before `hook` in `plugins` so extras are
+available to hooks on those events, such as a conversion followed by another
+import. Processed collections are removed from the queue to avoid processing them
+again at exit. Conversion exports and operations outside imports still use
+`cli_exit`.
+
+Use this option with care when several import tasks share a source directory:
+unpaired extras belong to the first collection for that directory, not every
+album. Files that would only be paired with a later task can be processed as
+unpaired extras before that task runs. Later plugins that need the original extras
+or change the audio destination can also be affected. A multidisc album imported
+as one task has all its tracks collected before `album_imported`.
+Unclaimed files still present in the source remain available for later pairing,
+including when `pairing_only` is enabled; files already moved away do not.
+
 ### File Handling & Renaming
 
 In order to collect extra files and artifacts, Filetote needs to be told which types of

@@ -9,6 +9,7 @@ directory: /beets/library
 
 filetote:
     convert: true
+    process_on_import: false
     extensions: .*
     filename:
         - "folder.jpg"

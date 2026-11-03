@@ -61,11 +61,17 @@ def _convert(
     ],
 )
 @pytest.mark.parametrize("keep_new", [False, True])
+@pytest.mark.parametrize("process_on_import", [False, True])
 def test_convert_exports_artifacts(
-    beets_flat_env: BeetsEnvFactory, link: bool, hardlink: bool, keep_new: bool
+    beets_flat_env: BeetsEnvFactory,
+    link: bool,
+    hardlink: bool,
+    keep_new: bool,
+    process_on_import: bool,
 ) -> None:
     """Conversion exports preserve source extras and honor link precedence."""
     env = beets_flat_env()
+    env.config["filetote"]["process_on_import"] = process_on_import
     env.config["filetote"]["extensions"] = ".*"
     env.config["filetote"]["pairing"]["enabled"] = True
     env.run_cli_command("import")

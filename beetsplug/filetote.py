@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from beets.importer import ImportSession, ImportTask
-    from beets.library import Item, Library
+    from beets.library import Album, Item, Library
 
 PathBytes: TypeAlias = bytes
 
@@ -138,6 +138,7 @@ class FiletotePlugin(BeetsPlugin):
             paths=self.config["paths"].get(dict),
             print_ignored=self.config["print_ignored"].get(bool),
             convert=self.config["convert"].get(bool),
+            process_on_import=self.config["process_on_import"].get(bool),
             duplicate_action=cast(
                 DuplicateAction,
                 self.config["duplicate_action"].as_str(),
@@ -251,6 +252,45 @@ class FiletotePlugin(BeetsPlugin):
 
         self.register_listener("cli_exit", self.process_events)
         self.register_listener("after_convert", self._after_convert)
+        self.register_listener("album_imported", self._album_imported)
+        self.register_listener("item_imported", self._item_imported)
+
+    def _album_imported(self, lib: Library, album: Album) -> None:
+        """Optionally process extras before subsequent album-import listeners."""
+        if self.filetote_config.process_on_import:
+            self._process_imported_items(lib, {item.id for item in album.items()})
+
+    def _item_imported(self, lib: Library, item: Item) -> None:
+        """Optionally process extras before subsequent item-import listeners."""
+        if self.filetote_config.process_on_import:
+            self._process_imported_items(lib, {item.id})
+
+    def _process_imported_items(self, lib: Library, item_ids: set[int]) -> None:
+        """Consume only the completed items' collections and shared extras."""
+        completed = FiletoteRun()
+        pending = FiletoteRun()
+        collection_indices: dict[int, tuple[FiletoteRun, int]] = {}
+        for index, collection in enumerate(self._run_state.process_queue):
+            target = completed if collection.beets_item.id in item_ids else pending
+            collection_indices[index] = (target, len(target.process_queue))
+            target.process_queue.append(collection)
+
+        for source, shared in self._run_state.shared_artifacts.items():
+            target, index = collection_indices[shared.mapping_index]
+            target.shared_artifacts[source] = FiletoteShared(
+                artifacts=shared.artifacts, mapping_index=index
+            )
+
+        self._process_events(lib, run=completed)
+        if self.filetote_config.pairing.enabled:
+            for source, shared in completed.shared_artifacts.items():
+                # Keep unclaimed sources available to later tasks, especially
+                # with pairing_only. Moved files can no longer be claimed.
+                self._run_state.pairing_candidates[source] = [
+                    path for path in shared.artifacts if path.exists()
+                ]
+        self._run_state.process_queue = pending.process_queue
+        self._run_state.shared_artifacts = pending.shared_artifacts
 
     def _after_convert(self, item: Item, dest: PathBytes) -> None:
         """Queue extras alongside a successfully exported convert output."""
@@ -651,16 +691,21 @@ class FiletotePlugin(BeetsPlugin):
         self, beets_item: Item, item_source_path: Path, item_destination_path: Path
     ) -> None:
         """Finds and processes paired artifacts for an item in an already-seen
-        directory when file "pairing" is enabled. This function looks through available
-        artifacts (if the "shared" pool) for potential matching pairs. When found, it
-        "claims" any files that are paired with the current item.
+        directory when file "pairing" is enabled. Looks through the shared pool or
+        candidates retained after an early import flush, claiming matching pairs.
         """
         if not self.filetote_config.pairing.enabled:
             return
 
         source_path: Path = item_source_path.parent
 
-        if source_path not in self._run_state.shared_artifacts:
+        shared = self._run_state.shared_artifacts.get(source_path)
+        candidates = (
+            shared.artifacts
+            if shared is not None
+            else self._run_state.pairing_candidates.get(source_path, [])
+        )
+        if shared is None and source_path not in self._run_state.pairing_candidates:
             return
 
         item_source_filename: str = item_source_path.stem
@@ -668,7 +713,7 @@ class FiletotePlugin(BeetsPlugin):
         remaining_shared: list[Path] = []
 
         # Iterate through shared artifacts to find paired matches
-        for artifact_path in self._run_state.shared_artifacts[source_path].artifacts:
+        for artifact_path in candidates:
             artifact_filename: str = artifact_path.stem
             artifact_ext: str = artifact_path.suffix
 
@@ -684,7 +729,10 @@ class FiletotePlugin(BeetsPlugin):
                 remaining_shared.append(artifact_path)
 
         # Update the shared artifacts pool to remove claimed pairs
-        self._run_state.shared_artifacts[source_path].artifacts = remaining_shared
+        if shared is not None:
+            shared.artifacts = remaining_shared
+        else:
+            self._run_state.pairing_candidates[source_path] = remaining_shared
 
         self._update_multimove_artifacts(
             beets_item, item_source_path, item_destination_path
@@ -907,9 +955,13 @@ class FiletotePlugin(BeetsPlugin):
             self._run_state = previous_run
 
     def _process_events(
-        self, lib: Library, operation: MoveOperation | None = None
+        self,
+        lib: Library,
+        operation: MoveOperation | None = None,
+        run: FiletoteRun | None = None,
     ) -> None:
         """Process a run, optionally overriding the operation for convert exports."""
+        run = run if run is not None else self._run_state
         # Ensure destination library settings are accessible
         self.filetote_config.session.adjust("_beets_lib", lib)
         # Make the library path easier to access
@@ -921,30 +973,26 @@ class FiletotePlugin(BeetsPlugin):
         is_debug = self._log.isEnabledFor(logging.DEBUG)
 
         if is_debug:
-            total_queued = sum(len(c.artifacts) for c in self._run_state.process_queue)
-            total_shared = sum(
-                len(s.artifacts) for s in self._run_state.shared_artifacts.values()
-            )
+            total_queued = sum(len(c.artifacts) for c in run.process_queue)
+            total_shared = sum(len(s.artifacts) for s in run.shared_artifacts.values())
             self._log.debug(
                 "Processing artifacts: {} queued, {} shared across {} directories",
                 total_queued,
                 total_shared,
-                len(self._run_state.shared_artifacts),
+                len(run.shared_artifacts),
             )
             has_queued = total_queued > 0
             has_shared = total_shared > 0
         else:
-            has_queued = any(c.artifacts for c in self._run_state.process_queue)
-            has_shared = any(
-                s.artifacts for s in self._run_state.shared_artifacts.values()
-            )
+            has_queued = any(c.artifacts for c in run.process_queue)
+            has_shared = any(s.artifacts for s in run.shared_artifacts.values())
 
         if not has_queued and not has_shared:
             self._log.info("No artifacts to process.")
             return
 
         # Process paired artifacts if they exist
-        for artifact_collection in self._run_state.process_queue:
+        for artifact_collection in run.process_queue:
             if artifact_collection.artifacts:
                 self.process_artifacts(
                     source_path=artifact_collection.source_path,
@@ -959,12 +1007,12 @@ class FiletotePlugin(BeetsPlugin):
             for (
                 source_path,
                 shared_artifacts,
-            ) in self._run_state.shared_artifacts.items():
+            ) in run.shared_artifacts.items():
                 if not shared_artifacts.artifacts:
                     continue
 
                 # Get mapping and item from the first collection
-                album_level_collection = self._run_state.process_queue[
+                album_level_collection = run.process_queue[
                     shared_artifacts.mapping_index
                 ]
                 album_level_mapping = album_level_collection.mapping

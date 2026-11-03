@@ -12,6 +12,18 @@ from tests.pytest_beets_plugin import load_plugin_source
 filetote_dataclasses = load_plugin_source("filetote_dataclasses")
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_process_on_import_config(enabled: bool) -> None:
+    """Import processing timing is a validated, opt-in boolean."""
+    assert filetote_dataclasses.FiletoteConfig().process_on_import is False
+    assert (
+        filetote_dataclasses.FiletoteConfig(process_on_import=enabled).process_on_import
+        is enabled
+    )
+    with pytest.raises(TypeError, match="process_on_import"):
+        filetote_dataclasses.FiletoteConfig(process_on_import="album_imported")
+
+
 class TestTypeErrorFunctions:
     """Test for functions in `filetote_dataclasses`, esp. TypeError validations."""
 
